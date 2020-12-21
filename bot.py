@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 import json
-import os
-import re
 from datetime import datetime
 from os.path import exists
-from sys import argv
 from time import sleep
 
 import aiofiles
 import discord
+import requests
 from discord.ext import commands
 
 ##### ======= #####
@@ -33,8 +31,11 @@ async def on_ready():
         with open('dumbass_scores.json', 'r') as f:
             dumbass_scores = json.loads(f.read())
 
+    # Set status
+    weather = await get_weather()
+    await client.change_presence(activity=discord.Game(f'{weather["temp"]}°F'), status=None, afk=False)
+
     # Show the bot as online
-    await client.change_presence(activity=discord.Game('Hello, sir'), status=None, afk=False)
     await log('Startup completed')
 
 
@@ -82,7 +83,6 @@ async def ping(ctx):
 
 @client.command(aliases=['dinc'])
 async def dumbass_increment(ctx, member_id='0', amount='0'):
-    # TODO: Display this at the top of the server
     global dumbass_scores
 
     # If 0 params passed, default to ctx.author +1
@@ -202,6 +202,21 @@ async def dumbasses(ctx):
         await ctx.send(f'Looks like you guys aren\'t that dumb...')
 
 
+@client.command()
+async def weather(ctx, location='fairborn'):
+    weather = await get_weather(location)
+
+    message = f'__**Weather: {weather["name"]}**__\n'
+    message += f'Temperature: {weather["temp"]}°F (feels like {weather["temp feels like"]}°F) {weather["temp min"]}°F / {weather["temp max"]}°F\n'
+    message += f'Weather: {weather["weather description"]}\n'
+    message += f'Wind: {weather["wind speed"]} mph {weather["wind direction"]}\n'
+    message += f'Cloud Cover: {weather["cloud cover"]}%\n'
+    message += f'Pressure: {weather["pressure"]} bar\n'
+    message += f'Humidity: {weather["humidity"]}%'
+
+    await ctx.send(message)
+
+
 ##### ============== #####
 ##### ADMIN COMMANDS #####
 ##### ============== #####
@@ -231,14 +246,18 @@ async def admin(ctx):
 
 @client.command()
 @commands.has_permissions(administrator=True)
-async def status(ctx, *, status):
+async def status(ctx, *, status=''):
     status = status.strip()
-    if status.lower() == 'none':
+    if status.lower() == 'none' or len(status) == 0:
         await client.change_presence(activity=None)
         await log(f'{ctx.author} disabled the custom status')
     elif len(status) <= 128:
+        # Prepend weather to status
+        weather = await get_weather()
+        status = f'{weather["temp"]}°F | ' + status
+
         await client.change_presence(activity=discord.Game(status))
-        await log(f'{ctx.author} changed the custom status to "Playing {status}"')
+        await log(f'{ctx.author} changed the custom status to "{status}"')
 
 
 ##### ================= #####
@@ -268,6 +287,36 @@ async def log(string, timestamp=True):
         for line in previous_logs:
             await f.write(line.strip() + '\n')
         await f.write(timestamp_string + ' ' + string + '\n')
+
+
+async def get_weather(location='fairborn'):
+    global certs
+    api_key = certs['openweather api key']
+
+    base_url = "http://api.openweathermap.org/data/2.5/weather?"
+    complete_url = base_url + "appid=" + api_key + "&q=" + location
+
+    response = requests.get(complete_url).json()
+
+    dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+
+    # Pull the parts we care about and put them into a dictionary
+    weather = {'name': response['name'],
+               'weather icon': response['weather'][0]['icon'],
+               'weather icon url': f'http://openweathermap.org/img/w/{response["weather"][0]["icon"]}.png',
+               'weather description': response['weather'][0]['main'].lower(),
+               'temp': int((response['main']['temp'] - 273.15) * 1.8 + 32),  # Convert from K to F
+               'temp min': int((response['main']['temp_min'] - 273.15) * 1.8 + 32),  # Convert from K to F
+               'temp max': int((response['main']['temp_max'] - 273.15) * 1.8 + 32),  # Convert from K to F
+               'temp feels like': int((response['main']['feels_like'] - 273.15) * 1.8 + 32),  # Convert from K to F
+               'pressure': round(response['main']['pressure'] * 0.001, 2),  # Convert from hPa to bar
+               'humidity': response['main']['humidity'],
+               'wind speed': round(response['wind']['speed'] * 2.23694, 2),  # Convert m/s to mph
+               'wind direction': dirs[round(response['wind']['deg'] / (360. / len(dirs))) % len(dirs)],  # Convert from deg to cardinal directions
+               'cloud cover': response['clouds']['all'],
+               }
+
+    return weather
 
 
 async def get_member(guild, member_id):
@@ -310,6 +359,8 @@ async def dm(member, content):
 
 
 if __name__ == '__main__':
+    global certs
+
     # Read in credentials
     with open('certs.json', 'r') as f:
         certs = json.loads(f.read())
