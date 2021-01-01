@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 import json
+import urllib.request
 from datetime import datetime
 from os.path import exists
 from time import sleep
 
 import aiofiles
 import discord
+import matplotlib.pyplot as plt
+import pandas as pd
 import requests
-from discord.ext import commands
+from bs4 import BeautifulSoup
+from discord.ext import commands, tasks
+
 
 ##### ======= #####
 ##### GLOBALS #####
 ##### ======= #####
 client = commands.Bot(command_prefix='/', intents=discord.Intents.all())
 dumbass_scores = {}
+status = ''
 
 
 ##### =========== #####
@@ -33,10 +39,25 @@ async def on_ready():
 
     # Set status
     weather = await get_weather()
-    await client.change_presence(activity=discord.Game(f'{weather["temp"]}°F'), status=None, afk=False)
+    await client.change_presence(activity=discord.Game(f'{weather["temp"]}°F in Fairborn, OH'), status=None, afk=False)
 
     # Show the bot as online
     await log('Startup completed')
+
+
+@tasks.loop(seconds=1200)
+async def update_status_temperature():
+    global status
+
+    if '|' not in status:
+        status = ''
+    else:
+        status = status.split(' | ')[1].strip()
+
+    weather = await get_weather()
+    status = f'{weather["temp"]}°F | {status}'
+    await client.change_presence(activity=discord.Game(status), status=None, afk=False)
+    await log('Updated status temperature')
 
 
 ##### ================ #####
@@ -217,6 +238,51 @@ async def weather(ctx, location='fairborn'):
     await ctx.send(message)
 
 
+@client.command()
+async def covid(ctx):
+    page = urllib.request.urlopen('https://www.wright.edu/coronavirus/covid-19-dashboard')
+    soup = BeautifulSoup(page, features='html.parser')
+    # print(soup.prettify())
+
+    # Parse tables
+    tables = soup.find_all('table', attrs={'cellpadding': '1', 'cellspacing': '1'})
+    columns = ['date', 'dayton_students', 'dayton_employees', 'lake_students', 'lake_employees']
+    data = []
+    for table_num, table in enumerate(tables):
+        table_body = table.find('tbody')
+
+        rows = table_body.find_all('tr')
+        for row in rows:
+            cols = row.find_all('td')
+            if str(cols[0]) != '<td><strong>Totals</strong></td>':
+                date = await format_covid_date(str(cols[0]).strip('</td>\np'))
+                # Check if date not in data
+                if not any(date in i for i in data):
+                    # If so, make new row
+                    data.append([date, 0, 0, 0, 0])
+
+                # Append data
+                for i in range(len(data)):
+                    if data[i][0] == date:
+                        confirmed = int(str(cols[1]).replace('strong>', '').strip('<>/td'))
+                        self_reported = int(str(cols[2]).replace('strong>', '').strip('<>/td'))
+                        data[i][table_num + 1] = confirmed + self_reported
+    data.reverse()
+
+    # Format data and put into DF
+    dataframe = pd.DataFrame(data, columns=columns)
+    dataframe.to_csv('wsu_covid_cases.csv', index=False)
+
+    # Generate plot
+    await generate_covid_plot(dataframe)
+
+    # Generate message
+    message = f'__**ACTIVE WRIGHT STATE COVID-19 CASES**__\n```{str(dataframe)}```Data collected from https://www.wright.edu/coronavirus/covid-19-dashboard'
+
+    # Send message
+    await ctx.send(message, file=discord.File('wsu_covid_plot.png'))
+
+
 ##### ============== #####
 ##### ADMIN COMMANDS #####
 ##### ============== #####
@@ -244,20 +310,28 @@ async def admin(ctx):
     await ctx.send(f'You\'re an admin, Harry!')
 
 
-@client.command()
+@client.command(aliases=['status'])
 @commands.has_permissions(administrator=True)
-async def status(ctx, *, status=''):
-    status = status.strip()
-    if status.lower() == 'none' or len(status) == 0:
+async def change_status(ctx, *, new_status=''):
+    global status
+
+    # Only I can change the status
+    if ctx.author.id != 472419156394901524:
+        return
+
+    new_status = new_status.strip()
+    if new_status.lower() == 'none' or len(new_status) == 0:
         await client.change_presence(activity=None)
         await log(f'{ctx.author} disabled the custom status')
-    elif len(status) <= 128:
+        status = ''
+    elif len(new_status) <= 128:
         # Prepend weather to status
         weather = await get_weather()
-        status = f'{weather["temp"]}°F | ' + status
+        new_status = f'{weather["temp"]}°F | ' + new_status
 
-        await client.change_presence(activity=discord.Game(status))
-        await log(f'{ctx.author} changed the custom status to "{status}"')
+        await client.change_presence(activity=discord.Game(new_status))
+        await log(f'{ctx.author} changed the custom status to "{new_status}"')
+        status = new_status
 
 
 ##### ================= #####
@@ -287,6 +361,56 @@ async def log(string, timestamp=True):
         for line in previous_logs:
             await f.write(line.strip() + '\n')
         await f.write(timestamp_string + ' ' + string + '\n')
+
+
+async def generate_covid_plot(dataframe):
+    def convert_to_active_cases(weeks):
+        # Active cases are the sum of confirmed and self-reported cases across both campuses for the current week plus the previous two weeks.
+        active_cases = []
+        for i in range(2, len(weeks)):
+            active_cases.append(weeks[i] + weeks[i - 1] + weeks[i - 2])
+        return active_cases
+
+    colors = ['black', 'red', 'blue', 'green', 'orange', 'purple']
+
+    datasets = []
+    # datasets.append(list(dataframe['dayton_students']))
+    datasets.append(convert_to_active_cases(dataframe['dayton_students']))
+    datasets.append(convert_to_active_cases(dataframe['dayton_employees']))
+    datasets.append(convert_to_active_cases(dataframe['lake_students']))
+    datasets.append(convert_to_active_cases(dataframe['lake_employees']))
+
+    dates = list(dataframe['date'])[2:]
+
+    dataset_labels = ['Dayton Students', 'Dayton Employees', 'Lake Students', 'Lake Employees']
+
+    fig = plt.figure()
+    ax1 = fig.add_subplot(111)
+
+    # Iterate through different datasets
+    for i in range(len(datasets)):
+        ax1.plot(dates, datasets[i], c=colors[i], label=dataset_labels[i], linestyle='-')
+
+    # plt.xticks([dates[i] for i in range(0, len(dates) + 1, len(dates) // 4)])
+    cleaned_dates = []
+    [cleaned_dates.append(x) for x in dates if x not in cleaned_dates]
+    dates = cleaned_dates.copy()
+    plt.xticks([dates[i] for i in range(0, len(dates), len(dates) // 4)])
+    plt.legend(loc='upper left')
+    plt.title('Active Wright State University COVID-19 Cases')
+
+    plt.savefig('wsu_covid_plot.png')
+
+
+async def format_covid_date(date):
+    months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+    month_day = date[:date.find('–')]
+    month = months.index(month_day[:month_day.find(' ')]) + 1
+    day = month_day[-2:].strip()
+    year = date[date.rfind(', ') + 1:].strip()
+
+    return f'{day}-{month}-{year}'
 
 
 async def get_weather(location='fairborn'):
