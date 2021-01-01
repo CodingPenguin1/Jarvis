@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+import datetime
 import json
 import urllib.request
 from datetime import datetime
 from os.path import exists
-from time import sleep
+from time import sleep, strftime
 
 import aiofiles
 import discord
@@ -12,7 +13,6 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from discord.ext import commands, tasks
-
 
 ##### ======= #####
 ##### GLOBALS #####
@@ -39,7 +39,14 @@ async def on_ready():
 
     # Set status
     weather = await get_weather()
+    status = f'{weather["temp"]}°F'
     await client.change_presence(activity=discord.Game(f'{weather["temp"]}°F in Fairborn, OH'), status=None, afk=False)
+
+    # Start tasks
+    await log('Starting task: update_status_temperature')
+    update_status_temperature.start()
+    await log('Starting task: wsu_covid_stats_message')
+    wsu_covid_stats_message.start()
 
     # Show the bot as online
     await log('Startup completed')
@@ -58,6 +65,20 @@ async def update_status_temperature():
     status = f'{weather["temp"]}°F | {status}'
     await client.change_presence(activity=discord.Game(status), status=None, afk=False)
     await log('Updated status temperature')
+
+
+@tasks.loop(seconds=3600)
+async def wsu_covid_stats_message():
+    # Get channel
+    for guild in client.guilds:
+        for channel in guild.channels:
+            if channel.name == 'wsu-covid-stats':
+                await channel.purge(limit=100)
+                # Generate message
+                dataframe = await get_wsu_covid_stats()
+                date = strftime('%d-%m-%Y')
+                message = f'__**ACTIVE WRIGHT STATE COVID-19 CASES ({date})**__\n```{dataframe}```Data collected from https://www.wright.edu/coronavirus/covid-19-dashboard'
+                await channel.send(message, file=discord.File('wsu_covid_plot.png'))
 
 
 ##### ================ #####
@@ -240,46 +261,9 @@ async def weather(ctx, location='fairborn'):
 
 @client.command()
 async def covid(ctx):
-    page = urllib.request.urlopen('https://www.wright.edu/coronavirus/covid-19-dashboard')
-    soup = BeautifulSoup(page, features='html.parser')
-    # print(soup.prettify())
-
-    # Parse tables
-    tables = soup.find_all('table', attrs={'cellpadding': '1', 'cellspacing': '1'})
-    columns = ['date', 'dayton_students', 'dayton_employees', 'lake_students', 'lake_employees']
-    data = []
-    for table_num, table in enumerate(tables):
-        table_body = table.find('tbody')
-
-        rows = table_body.find_all('tr')
-        for row in rows:
-            cols = row.find_all('td')
-            if str(cols[0]) != '<td><strong>Totals</strong></td>':
-                date = await format_covid_date(str(cols[0]).strip('</td>\np'))
-                # Check if date not in data
-                if not any(date in i for i in data):
-                    # If so, make new row
-                    data.append([date, 0, 0, 0, 0])
-
-                # Append data
-                for i in range(len(data)):
-                    if data[i][0] == date:
-                        confirmed = int(str(cols[1]).replace('strong>', '').strip('<>/td'))
-                        self_reported = int(str(cols[2]).replace('strong>', '').strip('<>/td'))
-                        data[i][table_num + 1] = confirmed + self_reported
-    data.reverse()
-
-    # Format data and put into DF
-    dataframe = pd.DataFrame(data, columns=columns)
-    dataframe.to_csv('wsu_covid_cases.csv', index=False)
-
-    # Generate plot
-    await generate_covid_plot(dataframe)
-
-    # Generate message
-    message = f'__**ACTIVE WRIGHT STATE COVID-19 CASES**__\n```{str(dataframe)}```Data collected from https://www.wright.edu/coronavirus/covid-19-dashboard'
-
-    # Send message
+    dataframe = await get_wsu_covid_stats()
+    date = strftime('%d-%m-%Y')
+    message = f'__**ACTIVE WRIGHT STATE COVID-19 CASES ({date})**__\n```{dataframe}```Data collected from https://www.wright.edu/coronavirus/covid-19-dashboard'
     await ctx.send(message, file=discord.File('wsu_covid_plot.png'))
 
 
@@ -411,6 +395,46 @@ async def format_covid_date(date):
     year = date[date.rfind(', ') + 1:].strip()
 
     return f'{day}-{month}-{year}'
+
+
+async def get_wsu_covid_stats():
+    page = urllib.request.urlopen('https://www.wright.edu/coronavirus/covid-19-dashboard')
+    soup = BeautifulSoup(page, features='html.parser')
+    # print(soup.prettify())
+
+    # Parse tables
+    tables = soup.find_all('table', attrs={'cellpadding': '1', 'cellspacing': '1'})
+    columns = ['date', 'dayton_students', 'dayton_employees', 'lake_students', 'lake_employees']
+    data = []
+    for table_num, table in enumerate(tables):
+        table_body = table.find('tbody')
+
+        rows = table_body.find_all('tr')
+        for row in rows:
+            cols = row.find_all('td')
+            if str(cols[0]) != '<td><strong>Totals</strong></td>':
+                date = await format_covid_date(str(cols[0]).strip('</td>\np'))
+                # Check if date not in data
+                if not any(date in i for i in data):
+                    # If so, make new row
+                    data.append([date, 0, 0, 0, 0])
+
+                # Append data
+                for i in range(len(data)):
+                    if data[i][0] == date:
+                        confirmed = int(str(cols[1]).replace('strong>', '').strip('<>/td'))
+                        self_reported = int(str(cols[2]).replace('strong>', '').strip('<>/td'))
+                        data[i][table_num + 1] = confirmed + self_reported
+    data.reverse()
+
+    # Format data and put into DF
+    dataframe = pd.DataFrame(data, columns=columns)
+    dataframe.to_csv('wsu_covid_cases.csv', index=False)
+
+    # Generate plot
+    await generate_covid_plot(dataframe)
+
+    return dataframe
 
 
 async def get_weather(location='fairborn'):
