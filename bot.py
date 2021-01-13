@@ -17,7 +17,7 @@ from discord.ext import commands, tasks
 ##### ======= #####
 ##### GLOBALS #####
 ##### ======= #####
-client = commands.Bot(command_prefix='/', intents=discord.Intents.all())
+client = commands.Bot(command_prefix='-', intents=discord.Intents.all())
 dumbass_scores = {}
 status = ''
 
@@ -29,6 +29,7 @@ status = ''
 async def on_ready():
     global reaction_roles
     global dumbass_scores
+    global status
 
     await log('Starting up...')
 
@@ -39,30 +40,40 @@ async def on_ready():
 
     # Set status
     weather = await get_weather()
-    status = f'{weather["temp"]}°F'
-    await client.change_presence(activity=discord.Game(f'{weather["temp"]}°F in Fairborn, OH'), status=None, afk=False)
+    if exists('status'):
+        with open('status', 'r') as f:
+            status = f.readline().strip()
+            if len(status) > 0:
+                status = f'{weather["temp"]}°F {status}'
+            else:
+                status = f'{weather["temp"]}°F in Fairborn, OH'
+    else:
+        status = f'{weather["temp"]}°F in Fairborn, OH'
+    await client.change_presence(activity=discord.Game(status), status=None, afk=False)
 
     # Start tasks
     await log('Starting task: update_status_temperature')
     update_status_temperature.start()
-    await log('Starting task: wsu_covid_stats_message')
-    wsu_covid_stats_message.start()
+    # await log('Starting task: wsu_covid_stats_message')
+    # wsu_covid_stats_message.start()
 
     # Show the bot as online
     await log('Startup completed')
 
 
-@tasks.loop(seconds=1200)
+# @tasks.loop(seconds=1200)
+@tasks.loop(seconds=5)
 async def update_status_temperature():
     global status
 
-    if '|' not in status:
-        status = ''
-    else:
-        status = status.split(' | ')[1].strip()
-
     weather = await get_weather()
-    status = f'{weather["temp"]}°F | {status}'
+
+    if '|' in status:
+        status = status.split(' | ')[1].strip()
+        status = f'{weather["temp"]}°F | {status}'
+    if len(status) == 0:
+        status = f'{weather["temp"]}°F'
+
     await client.change_presence(activity=discord.Game(status), status=None, afk=False)
     await log('Updated status temperature')
 
@@ -307,8 +318,15 @@ async def change_status(ctx, *, new_status=''):
     if new_status.lower() == 'none' or len(new_status) == 0:
         await client.change_presence(activity=None)
         await log(f'{ctx.author} disabled the custom status')
-        status = ''
+        weather = await get_weather()
+        status = f'{weather["temp"]}°F'
+        await client.change_presence(activity=discord.Game(status))
+        with open('status', 'w') as f:
+            f.write('')
     elif len(new_status) <= 128:
+        with open('status', 'w') as f:
+            f.write(new_status)
+
         # Prepend weather to status
         weather = await get_weather()
         new_status = f'{weather["temp"]}°F | ' + new_status
