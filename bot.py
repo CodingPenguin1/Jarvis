@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import csv
 import datetime
 import json
+import re
 import urllib.request
 from datetime import datetime
 from os.path import exists
@@ -61,8 +63,8 @@ async def on_ready():
     await log('Startup completed')
 
 
-# @tasks.loop(seconds=1200)
-@tasks.loop(seconds=5)
+@tasks.loop(seconds=1200)
+# @tasks.loop(seconds=5)
 async def update_status_temperature():
     global status
 
@@ -278,9 +280,94 @@ async def covid(ctx):
     await ctx.send(message, file=discord.File('wsu_covid_plot.png'))
 
 
+@client.command()
+async def owe(ctx, target=None, amount=None):
+    # Get objects for ctx.author, target, and amount
+    user = ctx.author
+    if target is not None:
+        target = re.sub('\\D', '', target)
+        target = await get_member_by_id(target)
+    if amount is not None:
+        amount = round(float(amount), 2)
+        if amount <= 0:
+            amount = None
+
+    if target is not None and amount is not None:
+        await debt_utility(ctx, target, user, -amount)
+
+
+@client.command()
+async def pay(ctx, target=None, amount=None):
+    # Get objects for ctx.author, target, and amount
+    user = ctx.author
+    if target is not None:
+        target = re.sub('\\D', '', target)
+        target = await get_member_by_id(target)
+    if amount is not None:
+        amount = round(float(amount), 2)
+        if amount <= 0:
+            amount = None
+
+    if target is not None and amount is not None:
+        await debt_utility(ctx, user, target, -amount)
+
+
+@client.command()
+async def debt(ctx, target=None, amount=None):
+    # Get objects for ctx.author, target, and amount
+    user = ctx.author
+    if target is not None:
+        target = re.sub('\\D', '', target)
+        target = await get_member_by_id(target)
+    if amount is not None:
+        amount = round(float(amount), 2)
+        if amount <= 0:
+            amount = None
+
+    # Target owes ctx.author amount
+    if target is not None and amount is not None:
+        await debt_utility(ctx, target, user, amount)
+
+    # Print how much ctx.author owes target, or vice versa
+    elif target is not None and amount is None:
+        message = '__Debt__\n'
+        # Read from csv and append to message
+        with open('debt_data.csv') as f:
+            csv_reader = csv.reader(f, delimiter=',')
+            for row in csv_reader:
+                if str(target.id) in str(row[0]) or str(target.id) in str(row[1]):
+                    ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
+                    owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
+
+                    message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
+        if message == '__Debt__\n':
+            await ctx.send('You have no debt and no one owes you')
+        else:
+            await ctx.send(message)
+
+    # Print every debt
+    elif target is None and amount is None:
+        message = '__Debt__\n'
+        # Read from csv and append to message
+        with open('debt_data.csv') as f:
+            csv_reader = csv.reader(f, delimiter=',')
+            for row in csv_reader:
+                ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
+                owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
+
+                message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
+        await ctx.send(message)
+
+    # Otherwise something broke, so do nothing
+    else:
+        pass
+
+
 ##### ============== #####
 ##### ADMIN COMMANDS #####
 ##### ============== #####
+
+
 @client.command()
 @commands.has_permissions(administrator=True)
 async def clear(ctx, amount=''):
@@ -363,6 +450,109 @@ async def log(string, timestamp=True):
         for line in previous_logs:
             await f.write(line.strip() + '\n')
         await f.write(timestamp_string + ' ' + string + '\n')
+
+
+async def format_money(value):
+    return '${:,.2f}'.format(value)
+
+
+async def get_member_by_id(member_id):
+    for guild in client.guilds:
+        for member in guild.members:
+            if str(member.id) == member_id:
+                return member
+
+
+async def debt_utility(ctx, target, user, amount):
+    # Target owes user amount
+
+    # Read existing data from file
+    data = []
+    if exists('debt_data.csv'):
+        with open('debt_data.csv', 'r') as f:
+            csv_reader = csv.reader(f, delimiter=',')
+            for row in csv_reader:
+                row[2] = float(row[2])
+                data.append(row)
+    else:
+        pass
+
+    # If amount is nothing, do nothing
+    if amount == 0:
+        return
+
+    # If amount is positive, target owes user amount
+    elif amount > 0:
+        target_owes_user = await owes(data, str(target.id), str(user.id))
+        user_owes_target = await owes(data, str(user.id), str(target.id))
+
+        if target_owes_user is not False:
+            data[target_owes_user][2] += amount
+            if data[target_owes_user][2] == 0:
+                data.pop(target_owes_user)
+
+        elif user_owes_target is not False:
+            data[user_owes_target][2] -= amount
+            if data[user_owes_target][2] == 0:
+                data.pop(user_owes_target)
+
+        elif target_owes_user is False and user_owes_target is False:
+            if amount != 0:
+                data.append([target.id, user.id, amount])
+
+    # If amount is negative, user owes target amount
+    else:
+        target_owes_user = await owes(data, str(target.id), str(user.id))
+        user_owes_target = await owes(data, str(user.id), str(target.id))
+
+        if target_owes_user is not False:
+            data[target_owes_user][2] += amount
+            if data[target_owes_user][2] == 0:
+                data.pop(target_owes_user)
+            elif data[target_owes_user][2] < 0:
+                data[target_owes_user][0], data[target_owes_user][1] = data[target_owes_user][1], data[target_owes_user][0]
+                data[target_owes_user][2] *= -1
+
+        elif user_owes_target is not False:
+            data[target_owes_user][2] -= amount
+            if data[target_owes_user][2] == 0:
+                data.pop(target_owes_user)
+            elif data[target_owes_user][2] < 0:
+                data[target_owes_user][0], data[target_owes_user][1] = data[target_owes_user][1], data[target_owes_user][0]
+                data[target_owes_user][2] *= -1
+
+        elif target_owes_user is False and user_owes_target is False:
+            if amount != 0:
+                data.append([user.id, target.id, -amount])
+
+    # Write to csv
+    with open('debt_data.csv', 'w') as f:
+        writer = csv.writer(f, delimiter=',')
+        for row in data:
+            writer.writerow([row[0], row[1], round(row[2], 2)])
+
+    # Print new debt values
+    message = '__Debt__\n'
+    # Read from csv and append to message
+    with open('debt_data.csv') as f:
+        csv_reader = csv.reader(f, delimiter=',')
+        for row in csv_reader:
+            if str(ctx.author.id) in str(row[0]) or str(ctx.author.id) in str(row[1]):
+                ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
+                owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
+                message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
+
+    if message == '__Debt__\n':
+        await ctx.send('You have no debt and no one owes you')
+    else:
+        await ctx.send(message)
+
+
+async def owes(data, target, user):
+    for i, row in enumerate(data):
+        if str(row[0]) == str(target) and str(row[1]) == str(user):
+            return i
+    return False
 
 
 async def generate_covid_plot(dataframe):
