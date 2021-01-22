@@ -15,6 +15,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from discord.ext import commands, tasks
+from tabulate import tabulate
 
 ##### ======= #####
 ##### GLOBALS #####
@@ -334,31 +335,22 @@ async def debt(ctx, target=None, amount=None):
         # Read from csv and append to message
         with open('debt_data.csv') as f:
             csv_reader = csv.reader(f, delimiter=',')
+            data = []
             for row in csv_reader:
-                if str(target.id) in str(row[0]) or str(target.id) in str(row[1]):
-                    ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
-                    owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
-
-                    message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
-        if message == '__Debt__\n':
-            await ctx.send('You have no debt and no one owes you')
-        else:
-            await ctx.send(message)
+                data.append(row)
+            await print_debt(ctx, data, member_id=target.id)
 
     # Print every debt
     elif target is None and amount is None:
-        message = '__Debt__\n'
-        # Read from csv and append to message
+        # message = '__Debt__\n'
+        # # Read from csv and append to message
         with open('debt_data.csv') as f:
             csv_reader = csv.reader(f, delimiter=',')
+            data = []
             for row in csv_reader:
-                ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
-                owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
+                data.append(row)
+            await print_debt(ctx, data)
 
-                message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
-        await ctx.send(message)
-
-    # Otherwise something broke, so do nothing
     else:
         pass
 
@@ -459,8 +451,35 @@ async def format_money(value):
 async def get_member_by_id(member_id):
     for guild in client.guilds:
         for member in guild.members:
-            if str(member.id) == member_id:
+            if str(member.id) == str(member_id):
                 return member
+
+
+async def print_debt(ctx, data, member_id=None):
+    # Print all debt
+    if member_id is None:
+        for i in range(len(data)):
+            data[i][0] = (await get_member_by_id(data[i][0])).nick if (await get_member_by_id(data[i][0])).nick is not None else (await get_member_by_id(data[i][0])).name
+            data[i][1] = (await get_member_by_id(data[i][1])).nick if (await get_member_by_id(data[i][1])).nick is not None else (await get_member_by_id(data[i][1])).name
+            data[i][2] = await format_money(float(data[i][2]))
+
+    # Print debt for member_id
+    else:
+        for i in range(len(data)):
+            if str(data[i][0]) != str(member_id) and str(data[i][1]) != str(member_id):
+                data.pop(i)
+            else:
+                data[i][0] = (await get_member_by_id(data[i][0])).nick if (await get_member_by_id(data[i][0])).nick is not None else (await get_member_by_id(data[i][0])).name
+                data[i][1] = (await get_member_by_id(data[i][1])).nick if (await get_member_by_id(data[i][1])).nick is not None else (await get_member_by_id(data[i][1])).name
+                data[i][2] = await format_money(data[i][2])
+
+            if i > len(data) - 1:
+                break
+
+    if len(data):
+        await ctx.send(f'```\n{tabulate(data, headers=["Debtor", "Debtee", "Amount"])}```')
+    else:
+        await ctx.send('You have no debt and no one owes you')
 
 
 async def debt_utility(ctx, target, user, amount):
@@ -512,20 +531,26 @@ async def debt_utility(ctx, target, user, amount):
             writer.writerow([row[0], row[1], round(row[2], 2)])
 
     # Print new debt values
-    message = '__Debt__\n'
+    # message = '__Debt__\n'
     # Read from csv and append to message
     with open('debt_data.csv') as f:
         csv_reader = csv.reader(f, delimiter=',')
+        data = []
         for row in csv_reader:
-            if str(ctx.author.id) in str(row[0]) or str(ctx.author.id) in str(row[1]):
-                ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
-                owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
-                message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
+            data.append(row)
+        await print_debt(ctx, data, member_id=target.id)
+    # with open('debt_data.csv') as f:
+    #     csv_reader = csv.reader(f, delimiter=',')
+    #     for row in csv_reader:
+    #         if str(ctx.author.id) in str(row[0]) or str(ctx.author.id) in str(row[1]):
+    #             ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
+    #             owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
+    #             message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
 
-    if message == '__Debt__\n':
-        await ctx.send('You have no debt and no one owes you')
-    else:
-        await ctx.send(message)
+    # if message == '__Debt__\n':
+    #     await ctx.send('You have no debt and no one owes you')
+    # else:
+    #     await ctx.send(message)
 
 
 async def owes(data, target, user):
