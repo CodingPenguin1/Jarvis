@@ -293,7 +293,7 @@ async def owe(ctx, target=None, amount=None):
             amount = None
 
     if target is not None and amount is not None:
-        await debt_utility(ctx, target, user, -amount)
+        await debt_utility(ctx, user, target, amount)
 
 
 @client.command()
@@ -478,52 +478,32 @@ async def debt_utility(ctx, target, user, amount):
         pass
 
     # If amount is nothing, do nothing
-    if amount == 0:
+    if amount <= 0:
         return
 
-    # If amount is positive, target owes user amount
-    elif amount > 0:
-        target_owes_user = await owes(data, str(target.id), str(user.id))
-        user_owes_target = await owes(data, str(user.id), str(target.id))
+    # Target owes user amount
+    target_owes_user = await owes(data, str(target.id), str(user.id))
+    user_owes_target = await owes(data, str(user.id), str(target.id))
 
-        if target_owes_user is not False:
-            data[target_owes_user][2] += amount
-            if data[target_owes_user][2] == 0:
-                data.pop(target_owes_user)
+    if target_owes_user is not False:
+        data[target_owes_user][2] += amount
+        if data[target_owes_user][2] == 0:
+            data.pop(target_owes_user)
+        elif data[target_owes_user][2] < 0:
+            data[target_owes_user][0], data[target_owes_user][1] = data[target_owes_user][1], data[target_owes_user][0]
+            data[target_owes_user][2] *= -1
 
-        elif user_owes_target is not False:
-            data[user_owes_target][2] -= amount
-            if data[user_owes_target][2] == 0:
-                data.pop(user_owes_target)
+    elif user_owes_target is not False:
+        data[user_owes_target][2] -= amount
+        if data[user_owes_target][2] == 0:
+            data.pop(user_owes_target)
+        elif data[target_owes_user][2] < 0:
+            data[target_owes_user][0], data[target_owes_user][1] = data[target_owes_user][1], data[target_owes_user][0]
+            data[target_owes_user][2] *= -1
 
-        elif target_owes_user is False and user_owes_target is False:
-            if amount != 0:
-                data.append([target.id, user.id, amount])
-
-    # If amount is negative, user owes target amount
-    else:
-        target_owes_user = await owes(data, str(target.id), str(user.id))
-        user_owes_target = await owes(data, str(user.id), str(target.id))
-
-        if target_owes_user is not False:
-            data[target_owes_user][2] += amount
-            if data[target_owes_user][2] == 0:
-                data.pop(target_owes_user)
-            elif data[target_owes_user][2] < 0:
-                data[target_owes_user][0], data[target_owes_user][1] = data[target_owes_user][1], data[target_owes_user][0]
-                data[target_owes_user][2] *= -1
-
-        elif user_owes_target is not False:
-            data[target_owes_user][2] -= amount
-            if data[target_owes_user][2] == 0:
-                data.pop(target_owes_user)
-            elif data[target_owes_user][2] < 0:
-                data[target_owes_user][0], data[target_owes_user][1] = data[target_owes_user][1], data[target_owes_user][0]
-                data[target_owes_user][2] *= -1
-
-        elif target_owes_user is False and user_owes_target is False:
-            if amount != 0:
-                data.append([user.id, target.id, -amount])
+    elif target_owes_user is False and user_owes_target is False:
+        if amount != 0:
+            data.append([target.id, user.id, amount])
 
     # Write to csv
     with open('debt_data.csv', 'w') as f:
