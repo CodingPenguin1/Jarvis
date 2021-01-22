@@ -309,7 +309,7 @@ async def pay(ctx, target=None, amount=None):
             amount = None
 
     if target is not None and amount is not None:
-        await debt_utility(ctx, user, target, -amount)
+        await debt_utility(ctx, target, user, amount)
 
 
 @client.command()
