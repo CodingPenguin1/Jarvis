@@ -497,9 +497,9 @@ async def debt_utility(ctx, target, user, amount):
         data[user_owes_target][2] -= amount
         if data[user_owes_target][2] == 0:
             data.pop(user_owes_target)
-        elif data[target_owes_user][2] < 0:
-            data[target_owes_user][0], data[target_owes_user][1] = data[target_owes_user][1], data[target_owes_user][0]
-            data[target_owes_user][2] *= -1
+        elif data[user_owes_target][2] < 0:
+            data[user_owes_target][0], data[user_owes_target][1] = data[user_owes_target][1], data[user_owes_target][0]
+            data[user_owes_target][2] *= -1
 
     elif target_owes_user is False and user_owes_target is False:
         if amount != 0:
