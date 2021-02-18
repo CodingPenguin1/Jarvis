@@ -218,7 +218,10 @@ async def dumbass_increment(ctx, member_id='0', amount='0'):
     scores = []
     for member_id in dumbass_scores[str(ctx.guild.id)].keys():
         member = await get_member(ctx.guild, member_id)
-        scores.append((member.nick, dumbass_scores[str(ctx.guild.id)][member_id]))
+        if member.nick is not None:
+            scores.append((member.nick, dumbass_scores[str(ctx.guild.id)][member_id]))
+        else:
+            scores.append((member.name, dumbass_scores[str(ctx.guild.id)][member_id]))
 
     # Sort scores
     scores.sort(key=lambda tup: tup[1])
@@ -356,8 +359,6 @@ async def debt(ctx, target=None, amount=None):
 ##### ============== #####
 ##### ADMIN COMMANDS #####
 ##### ============== #####
-
-
 @client.command()
 @commands.has_permissions(administrator=True)
 async def clear(ctx, amount=''):
