@@ -331,7 +331,6 @@ async def debt(ctx, target=None, amount=None):
 
     # Print how much ctx.author owes target, or vice versa
     elif target is not None and amount is None:
-        message = '__Debt__\n'
         # Read from csv and append to message
         with open('debt_data.csv') as f:
             csv_reader = csv.reader(f, delimiter=',')
@@ -342,7 +341,6 @@ async def debt(ctx, target=None, amount=None):
 
     # Print every debt
     elif target is None and amount is None:
-        # message = '__Debt__\n'
         # # Read from csv and append to message
         with open('debt_data.csv') as f:
             csv_reader = csv.reader(f, delimiter=',')
@@ -445,7 +443,7 @@ async def log(string, timestamp=True):
 
 
 async def format_money(value):
-    return '${:,.2f}'.format(value)
+    return '${:,.2f}'.format(float(value))
 
 
 async def get_member_by_id(member_id):
@@ -465,9 +463,13 @@ async def print_debt(ctx, data, member_id=None):
 
     # Print debt for member_id
     else:
-        for i in range(len(data)):
+        i = 0
+        stop = len(data)
+        while i < stop:
             if str(data[i][0]) != str(member_id) and str(data[i][1]) != str(member_id):
                 data.pop(i)
+                stop = len(data)
+                i -= 1
             else:
                 data[i][0] = (await get_member_by_id(data[i][0])).nick if (await get_member_by_id(data[i][0])).nick is not None else (await get_member_by_id(data[i][0])).name
                 data[i][1] = (await get_member_by_id(data[i][1])).nick if (await get_member_by_id(data[i][1])).nick is not None else (await get_member_by_id(data[i][1])).name
@@ -475,6 +477,7 @@ async def print_debt(ctx, data, member_id=None):
 
             if i > len(data) - 1:
                 break
+            i += 1
 
     if len(data):
         await ctx.send(f'```\n{tabulate(data, headers=["Debtor", "Debtee", "Amount"])}```')
@@ -493,9 +496,6 @@ async def debt_utility(ctx, target, user, amount):
             for row in csv_reader:
                 row[2] = float(row[2])
                 data.append(row)
-    else:
-        pass
-
     # If amount is nothing, do nothing
     if amount <= 0:
         return
@@ -520,7 +520,7 @@ async def debt_utility(ctx, target, user, amount):
             data[user_owes_target][0], data[user_owes_target][1] = data[user_owes_target][1], data[user_owes_target][0]
             data[user_owes_target][2] *= -1
 
-    elif target_owes_user is False and user_owes_target is False:
+    else:
         if amount != 0:
             data.append([target.id, user.id, amount])
 
@@ -531,26 +531,12 @@ async def debt_utility(ctx, target, user, amount):
             writer.writerow([row[0], row[1], round(row[2], 2)])
 
     # Print new debt values
-    # message = '__Debt__\n'
-    # Read from csv and append to message
     with open('debt_data.csv') as f:
         csv_reader = csv.reader(f, delimiter=',')
         data = []
         for row in csv_reader:
             data.append(row)
         await print_debt(ctx, data, member_id=target.id)
-    # with open('debt_data.csv') as f:
-    #     csv_reader = csv.reader(f, delimiter=',')
-    #     for row in csv_reader:
-    #         if str(ctx.author.id) in str(row[0]) or str(ctx.author.id) in str(row[1]):
-    #             ower = (await get_member_by_id(row[0])).nick if (await get_member_by_id(row[0])).nick is not None else (await get_member_by_id(row[0])).name
-    #             owed = (await get_member_by_id(row[1])).nick if (await get_member_by_id(row[1])).nick is not None else (await get_member_by_id(row[1])).name
-    #             message += f'{ower} owes {owed} {await format_money(float(row[2]))}\n'
-
-    # if message == '__Debt__\n':
-    #     await ctx.send('You have no debt and no one owes you')
-    # else:
-    #     await ctx.send(message)
 
 
 async def owes(data, target, user):
