@@ -3,3 +3,8 @@ twitter_credentials.json
 dumbass_scores.json
 status
 log
+.env
+__pycache__/
+dumbasses.csv
+movies.csv
+.vscode/
