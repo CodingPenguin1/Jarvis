@@ -52,8 +52,14 @@ class Movies(commands.Cog):
 
         movie_message = ''
 
+        # Get a data fram of all the movies that haven't been watched and sort them alphabetically
+        unwatched = self.movie_list.loc[self.movie_list['Watched'] == False].sort_values(by='Title')
+        watched = self.movie_list.loc[self.movie_list['Watched'] == True].sort_values(by='Title')
+
+        all_movies = pd.concat([unwatched, watched])
+
         # Discord messages can't hold more than 2000 characters, so split the message into multiple messages if necessary
-        for index, row in self.movie_list.iterrows():
+        for index, row in all_movies.iterrows():
             line = f'**{row["Title"]}**, added by {row["User"]}'
 
             # Strike the movie if it's been watched
@@ -103,6 +109,32 @@ class Movies(commands.Cog):
         await ctx.send(f'We\'re watching **{movie["Title"].values[0]}**!')
 
 
+    async def remove_movie(self, ctx, movie_name: str):
+        # Check to make sure that the movie exists
+        if movie_name.lower() not in (str(i).lower() for i in self.movie_list['Title'].values):
+            await ctx.send('You can\'t remove a movie that\'s not on the list')
+            return
+
+        index = self.movie_list[self.movie_list['Title'].str.contains(movie_name.lower(), na=False, case=False)].index
+
+        # get the name of the person that added the movie
+        user = self.movie_list.loc[index, 'User'].values[0]
+
+        print(user)
+
+        # remove that index from the dataframe
+        self.movie_list = self.movie_list.drop(index)
+        self.movie_list.to_csv('movies.csv', index=False)
+
+        # Send a message to the channel to confirm the movie was watched
+        member = ctx.guild.get_member_named(user)
+        print(member)
+        if member is not None:
+            await ctx.send(f'**{movie_name}** has been removed from the watch list! Sorry {member.mention} :(')
+        else:
+            await ctx.send(f'**{movie_name}** has been removed from the watch list!')
+
+
     async def throw_tomato(self, ctx):
         # Grab a random movie from rotten tomatoes
 
@@ -135,13 +167,15 @@ class Movies(commands.Cog):
     @commands.command()
     async def movie(self, ctx, subcommand=None, *movie_name):
         if subcommand in ['need', 'add']:
-            await self.need_movie(ctx, movie_name=' '.join(movie_name))
+            await self.need_movie(ctx, movie_name=' '.join(movie_name).replace('@', '＠'))
         elif subcommand == 'list':
             await self.list_movies(ctx)
         elif subcommand == 'watch':
-            await self.watch(ctx, movie_name=' '.join(movie_name))
+            await self.watch(ctx, movie_name=' '.join(movie_name).replace('@', '＠'))
         elif subcommand in ['pick', 'random']:
             await self.pick_movie(ctx)
+        elif subcommand == 'remove':
+            await self.remove_movie(ctx, movie_name=' '.join(movie_name).replace('@', '＠'))
         elif subcommand == 'tomato':
             await self.throw_tomato(ctx)
         else:
@@ -151,4 +185,5 @@ class Movies(commands.Cog):
                            f'`{self.bot.command_prefix}movie list` - List all the movies in the watch list\n' +
                            f'`{self.bot.command_prefix}movie watch [movie_name]` - Watch a movie\n' +
                            f'`{self.bot.command_prefix}movie pick` - Pick a random movie to watch\n' +
-                           f'`{self.bot.command_prefix}movie random` - Same as `pick`')
+                           f'`{self.bot.command_prefix}movie random` - Same as `pick`\n' +
+                           f'`{self.bot.command_prefix}movie remove [movie_name]` - Remove a movie from the watch list')
