@@ -1,4 +1,6 @@
 async def get_member(guild, member_id):
+    member_id = int(member_id)
+
     # Primary method
     member = guild.get_member(member_id)
     if member is not None:

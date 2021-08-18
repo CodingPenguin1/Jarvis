@@ -1,6 +1,6 @@
-from time import sleep
-
+import pandas as pd
 from discord.ext import commands
+from utils import *
 
 
 def setup(bot):
@@ -11,93 +11,141 @@ class Debt(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # @commands.command(help='`/clear AMOUNT` to clear AMOUNT messages\n`/clear all` to clear all messages from this channel')
-    # @commands.has_permissions(administrator=True)
-    # async def clear(self, ctx, amount=''):
-    #     if amount == 'all':
-    #         if not await confirmation(self.bot, ctx):
-    #             return
-    #         await ctx.send(f'Clearing all messages from this channel')
-    #         await log(self.bot, f'{ctx.author} cleared {amount} messages from #{ctx.channel}')
-    #         amount = 999999999999999999999999999999999999999999
-    #     elif amount == '':
-    #         await ctx.send(f'No args passed. Use `/clear AMOUNT` to clear AMOUNT messages. Use `/clear all` to clear all messages from this channel')
-    #         await log(self.bot, f'{ctx.author} attempted to clear messages from #{ctx.channel}, but it failed because parameter "amount" was not passed')
-    #         return
-    #     else:
-    #         amount = int(amount)
-    #         if amount >= 10 and not await confirmation(self.bot, ctx):
-    #             return
-    #         await ctx.send(f'Clearing {amount} messages from this channel')
-    #         await log(self.bot, f'{ctx.author} cleared {amount} messages from #{ctx.channel}')
-    #     sleep(1)
-    #     await ctx.channel.purge(limit=int(float(amount)) + 2)
+    @commands.command()
+    async def owe(self, ctx, target, amount):
+        assert float(amount) > 0, 'Amount must be positive'
+        assert float(amount) < 420, 'Amount must be less than $420'
+        await self.debt_utility(ctx, ctx.author, target, amount)
+        await self.print_debt(ctx, target=ctx.author)
 
-    # @client.command()
-    # async def owe(ctx, target=None, amount=None):
-    #     # Get objects for ctx.author, target, and amount
-    #     user = ctx.author
-    #     if target is not None:
-    #         target = re.sub('\\D', '', target)
-    #         target = await get_member_by_id(target)
-    #     if amount is not None:
-    #         amount = round(float(amount), 2)
-    #         if amount <= 0:
-    #             amount = None
+    @commands.command()
+    async def pay(self, ctx, target=None, amount=None):
+        assert float(amount) > 0, 'Amount must be positive'
+        assert float(amount) < 420, 'Amount must be less than $420'
+        await self.debt_utility(ctx, target, ctx.author, amount)
+        await self.print_debt(ctx, target=ctx.author)
 
-    #     if target is not None and amount is not None:
-    #         await debt_utility(ctx, user, target, amount)
+    @commands.command()
+    async def debt(self, ctx, target=None, amount=None):
+        # If no amount passed, print debts
+        if amount is None:
+            await self.print_debt(ctx, target)
 
-    # @client.command()
-    # async def pay(ctx, target=None, amount=None):
-    #     # Get objects for ctx.author, target, and amount
-    #     user = ctx.author
-    #     if target is not None:
-    #         target = re.sub('\\D', '', target)
-    #         target = await get_member_by_id(target)
-    #     if amount is not None:
-    #         amount = round(float(amount), 2)
-    #         if amount <= 0:
-    #             amount = None
+        # If amount passed, target owes user
+        else:
+            assert float(amount) > 0, 'Amount must be positive'
+            assert float(amount) < 420, 'Amount must be less than $420'
+            await self.debt_utility(ctx, target, ctx.author, amount)
+            await self.print_debt(ctx, target=ctx.author)
 
-    #     if target is not None and amount is not None:
-    #         await debt_utility(ctx, target, user, amount)
+    @commands.command()
+    async def groceries(self, ctx):
+        try:
+            data = pd.read_csv('debt_data.csv', header=None, dtype=str)
 
-    # @client.command()
-    # async def debt(ctx, target=None, amount=None):
-    #     # Get objects for ctx.author, target, and amount
-    #     user = ctx.author
-    #     if target is not None:
-    #         target = re.sub('\\D', '', target)
-    #         target = await get_member_by_id(target)
-    #     if amount is not None:
-    #         amount = round(float(amount), 2)
-    #         if amount <= 0:
-    #             amount = None
+            debts = {}
+            for _, row in data.iterrows():
+                debtor = await get_member(ctx.guild, row[0])
+                amount = float(row[2])
+                if debtor not in debts:
+                    debts[debtor] = amount
+                else:
+                    debts[debtor] += amount
 
-    #     # Target owes ctx.author amount
-    #     if target is not None and amount is not None:
-    #         await debt_utility(ctx, target, user, amount)
+            sorted_debts = sorted(debts.items(), key=lambda x: x[1])
+            sorted_debts.reverse()
 
-    #     # Print how much ctx.author owes target, or vice versa
-    #     elif target is not None and amount is None:
-    #         # Read from csv and append to message
-    #         with open('debt_data.csv') as f:
-    #             csv_reader = csv.reader(f, delimiter=',')
-    #             data = []
-    #             for row in csv_reader:
-    #                 data.append(row)
-    #             await print_debt(ctx, data, member_id=target.id)
+            message = ''
+            for member in sorted_debts:
+                message = message + member[0].mention + ': ${:,.2f}'.format(float(member[1])) + '\n'
+            await ctx.send(message)
 
-    #     # Print every debt
-    #     elif target is None and amount is None:
-    #         # # Read from csv and append to message
-    #         with open('debt_data.csv') as f:
-    #             csv_reader = csv.reader(f, delimiter=',')
-    #             data = []
-    #             for row in csv_reader:
-    #                 data.append(row)
-    #             await print_debt(ctx, data)
+        except pd.errors.EmptyDataError:
+            await ctx.send('No one owes anyone anything')
 
-    #     else:
-    #         pass
+    async def debt_utility(self, ctx, target, user, amount):
+        '''Target owes user amount'''
+        try:
+            data = pd.read_csv('debt_data.csv', header=None, dtype=str)
+            data = data.values.tolist()
+        except pd.errors.EmptyDataError:
+            data = []
+
+        # Get member objects
+        if type(target) == str:
+            target = await get_member(ctx.guild, ''.join(c for c in target if c.isdigit()))
+        if type(user) == str:
+            user = await get_member(ctx.guild, ''.join(c for c in user if c.isdigit()))
+        assert target != user, 'Stop it, idiot'
+
+        # Find out if debt already exists between debtor and debtee
+        existing_debt_row = -1
+        for i, row in enumerate(data):
+            debtor = await get_member(ctx.guild, row[0])
+            debtee = await get_member(ctx.guild, row[1])
+
+            if (debtor == target and debtee == user) or (debtor == user and debtee == target):
+                existing_debt_row = i
+                break
+
+        # If debt already exists
+        if existing_debt_row >= 0:
+            row = data[existing_debt_row]
+            # If adding to existing debt
+            if debtor == target and debtee == user:
+                row[2] = float(row[2]) + float(amount)
+
+            # If subtracting from existing debt
+            if debtor == user and debtee == target:
+                row[2] = float(row[2]) - float(amount)
+
+                # If new debt is negative, flip debtor and debtee
+                if row[2] < 0:
+                    row[0], row[1] = row[1], row[0]
+                    row[2] = abs(row[2])
+
+        # If debt does not exist, create row
+        else:
+            data.append([target.id, user.id, amount])
+
+        # Remove 0 debt rows
+        i, stop = 0, len(data)
+        while i < stop:
+            if round(float(data[i][2]), 2) == 0:
+                data.pop(i)
+                i -= 1
+                stop = len(data)
+            i += 1
+
+        data = pd.DataFrame(data)
+        data.to_csv('debt_data.csv', header=False, index=False)
+
+    async def print_debt(self, ctx, target=None):
+        try:
+            data = pd.read_csv('debt_data.csv', header=None, dtype=str)
+            message = ''
+
+            # If target passed, print debts for target
+            if target is not None:
+                if type(target) == str:
+                    target_id = ''.join(c for c in target if c.isdigit())
+                    target = await get_member(ctx.guild, target_id)
+                for _, row in data.iterrows():
+                    debtor = await get_member(ctx.guild, row[0])
+                    debtee = await get_member(ctx.guild, row[1])
+                    if target in {debtor, debtee}:
+                        message = message + debtor.mention + ' owes ' + debtee.mention + ' ${:,.2f}'.format(float(row[2])) + '\n'
+                if len(message.strip()) == 0:
+                    message = f'{target.mention} has no debts and no one owes them'
+
+            # If target not passed, print all debts
+            else:
+                for _, row in data.iterrows():
+                    debtor = await get_member(ctx.guild, row[0])
+                    debtee = await get_member(ctx.guild, row[1])
+                    message = message + debtor.mention + ' owes ' + debtee.mention + ' ${:,.2f}'.format(float(row[2])) + '\n'
+
+            await ctx.send(message)
+
+        except pd.errors.EmptyDataError:
+            await ctx.send('No one owes anyone anything')
