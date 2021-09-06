@@ -247,7 +247,7 @@ class UserCommands(commands.Cog):
         target = await get_member(ctx.guild, member_id)
         if target.id == author.id:
             # Add to csv and save
-            self.dumbass_list = self.dumbass_list.append({'id': member_id, 'reason': reason, 'timestamp': time()}, ignore_index=True)
+            self.dumbass_list = self.dumbass_list.append({'id': int(member_id), 'reason': reason, 'timestamp': time()}, ignore_index=True)
             self.dumbass_list.to_csv('dumbasses.csv', index=False)
 
             # Make leaderboard
